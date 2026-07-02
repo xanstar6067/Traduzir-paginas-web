@@ -1338,7 +1338,19 @@ twpConfig
         apiKey: $("#libreKEY").value,
       };
       try {
-        new URL(libre.url);
+        const libreUrl = new URL(libre.url);
+        const isLocalEndpoint =
+          libreUrl.hostname === "localhost" ||
+          libreUrl.hostname === "127.0.0.1" ||
+          libreUrl.hostname === "[::1]";
+        if (
+          libreUrl.protocol !== "https:" &&
+          !(libreUrl.protocol === "http:" && isLocalEndpoint)
+        ) {
+          throw new Error(
+            "LibreTranslate requires HTTPS (HTTP is allowed only for localhost)"
+          );
+        }
         if (libre.apiKey.length < 10) {
           throw new Error("Provides an API Key");
         }
@@ -1391,14 +1403,22 @@ twpConfig
     }
 
     async function testDeepLFreeApiKey(apiKey) {
-      return await new Promise((resolve) => {
+      return await new Promise((resolve, reject) => {
         const xhttp = new XMLHttpRequest();
         xhttp.open("GET", "https://api-free.deepl.com/v2/usage");
         xhttp.responseType = "json";
+        xhttp.timeout = 10000;
         xhttp.setRequestHeader("Authorization", "DeepL-Auth-Key " + apiKey);
         xhttp.onload = () => {
-          resolve(xhttp.response);
+          if (xhttp.status >= 200 && xhttp.status < 300) {
+            resolve(xhttp.response);
+          } else {
+            reject(new Error(`DeepL returned HTTP ${xhttp.status}`));
+          }
         };
+        xhttp.onerror = () => reject(new Error("DeepL network error"));
+        xhttp.onabort = () => reject(new Error("DeepL request was aborted"));
+        xhttp.ontimeout = () => reject(new Error("DeepL request timed out"));
         xhttp.send();
       });
     }
@@ -1457,9 +1477,13 @@ twpConfig
       .find((cs) => cs.name === "deepl_freeapi");
     if (deepl_freeapi) {
       $("#deeplKEY").value = deepl_freeapi.apiKey;
-      testDeepLFreeApiKey(deepl_freeapi.apiKey).then((response) => {
-        $("#deeplApiResponse").textContent = JSON.stringify(response);
-      });
+      testDeepLFreeApiKey(deepl_freeapi.apiKey)
+        .then((response) => {
+          $("#deeplApiResponse").textContent = JSON.stringify(response);
+        })
+        .catch((error) => {
+          $("#deeplApiResponse").textContent = error.message;
+        });
     }
 
     $("#showMobilePopupOnDesktop").onchange = (e) => {

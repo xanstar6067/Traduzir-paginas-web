@@ -122,6 +122,15 @@ async function handleCustomWords(
   currentSourceLanguage,
   currentTargetLanguage
 ) {
+  const usedCompressionIndexes = new Set();
+  const compressionIndexRegex = /@%\s*(\d+)/g;
+  const translatedString = String(translated || "");
+  let compressionIndexMatch;
+  while (
+    (compressionIndexMatch = compressionIndexRegex.exec(translatedString))
+  ) {
+    usedCompressionIndexes.add(Number(compressionIndexMatch[1]));
+  }
   try {
     if (customDictionary.size > 0 && currentPageTranslatorService !== "bing") {
       // If the translation is a single word and exists in the dictionary, return it directly
@@ -142,6 +151,7 @@ async function handleCustomWords(
             startIndex + startMark.length,
             endIndex
           );
+          usedCompressionIndexes.add(Number(placeholderText));
           // At this point placeholderText is actually currentIndex , the real value is in compressionMap
           let keyWord = handleHitKeywords(placeholderText, false);
           if (keyWord === "undefined") {
@@ -171,6 +181,12 @@ async function handleCustomWords(
       currentTargetLanguage,
       originalText
     );
+  } finally {
+    usedCompressionIndexes.forEach((index) => compressionMap?.delete(index));
+    if (compressionMap?.size === 0) {
+      compressionMap = undefined;
+      currentIndex = undefined;
+    }
   }
 
   return translated;
@@ -1169,6 +1185,8 @@ Promise.all([twpConfig.onReady(), getTabHostName()]).then(function (_) {
   pageTranslator.restorePage = function () {
     fooCount++;
     piecesToTranslate = [];
+    compressionMap = undefined;
+    currentIndex = undefined;
 
     showOriginal.disable();
     disableMutatinObserver();
@@ -1200,7 +1218,7 @@ Promise.all([twpConfig.onReady(), getTabHostName()]).then(function (_) {
         ntr.node.replaceWith(ntr.original);
       }
       if (ntr.originalScale) {
-        ntr.parentNode.style.transform = `scaleX(${ntr.originalScale}`;
+        ntr.parentNode.style.transform = `scaleX(${ntr.originalScale})`;
       }
     }
     nodesToRestore = [];

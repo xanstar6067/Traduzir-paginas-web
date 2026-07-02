@@ -61,7 +61,211 @@ const twpConfig = (function () {
     addPaddingToPage: "no",
     proxyServers: {},
   };
+  const settingsExcludedFromBackup = new Set(["customServices"]);
+  const yesNoSettings = new Set(
+    Object.keys(defaultConfig).filter(
+      (key) => defaultConfig[key] === "yes" || defaultConfig[key] === "no"
+    )
+  );
+  const allowedStringValues = {
+    pageTranslatorService: ["google", "bing", "yandex"],
+    textTranslatorService: ["google", "bing", "yandex", "deepl", "libre"],
+    textToSpeechService: ["google", "bing"],
+    whenShowMobilePopup: ["when-necessary", "only-when-i-touch", "always-show"],
+    darkMode: ["auto", "yes", "no"],
+    popupMobilePosition: ["top", "bottom"],
+  };
   const config = structuredClone(defaultConfig);
+
+  function isPlainObject(value) {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      (Object.getPrototypeOf(value) === Object.prototype ||
+        Object.getPrototypeOf(value) === null)
+    );
+  }
+
+  function isLanguageCode(value) {
+    return (
+      typeof value === "string" &&
+      /^[a-z]{2,3}(?:[-_][a-z0-9]{2,8})*$/i.test(value)
+    );
+  }
+
+  function isLocalHostname(hostname) {
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "[::1]"
+    );
+  }
+
+  function isSecureServiceUrl(value) {
+    if (typeof value !== "string" || value.length > 2048) return false;
+    try {
+      const url = new URL(value);
+      return (
+        url.protocol === "https:" ||
+        (url.protocol === "http:" && isLocalHostname(url.hostname))
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function validateStringArray(value, validator = () => true) {
+    return (
+      Array.isArray(value) &&
+      value.length <= 10000 &&
+      value.every(
+        (item) =>
+          typeof item === "string" && item.length <= 10000 && validator(item)
+      )
+    );
+  }
+
+  function validateCustomServices(value) {
+    if (!Array.isArray(value) || value.length > 2) return false;
+    const serviceNames = new Set();
+    return value.every((service) => {
+      if (
+        !isPlainObject(service) ||
+        typeof service.name !== "string" ||
+        serviceNames.has(service.name)
+      ) {
+        return false;
+      }
+      serviceNames.add(service.name);
+
+      if (service.name === "libre") {
+        return (
+          isSecureServiceUrl(service.url) &&
+          typeof service.apiKey === "string" &&
+          service.apiKey.length >= 10 &&
+          service.apiKey.length <= 10000
+        );
+      }
+      if (service.name === "deepl_freeapi") {
+        return (
+          typeof service.apiKey === "string" &&
+          service.apiKey.length > 0 &&
+          service.apiKey.length <= 10000
+        );
+      }
+      return false;
+    });
+  }
+
+  function validateProxyServers(value) {
+    if (!isPlainObject(value)) return false;
+    if (Object.keys(value).some((key) => key !== "google")) return false;
+    if (typeof value.google === "undefined") return true;
+    if (!isPlainObject(value.google)) return false;
+    if (
+      Object.keys(value.google).some(
+        (key) => key !== "translateServer" && key !== "ttsServer"
+      )
+    ) {
+      return false;
+    }
+
+    return [value.google.translateServer, value.google.ttsServer].every(
+      (host) =>
+        host === null ||
+        typeof host === "undefined" ||
+        (typeof host === "string" &&
+          host.length <= 253 &&
+          !/[\s/@]/.test(host))
+    );
+  }
+
+  function validateImportedValue(key, value) {
+    if (yesNoSettings.has(key)) return value === "yes" || value === "no";
+    if (allowedStringValues[key]) {
+      return allowedStringValues[key].includes(value);
+    }
+    if (key === "uiLanguage") {
+      return value === "default" || isLanguageCode(value);
+    }
+    if (key === "targetLanguage" || key === "targetLanguageTextTranslation") {
+      return value === null || isLanguageCode(value);
+    }
+    if (key === "targetLanguages") {
+      return (
+        validateStringArray(value, isLanguageCode) &&
+        value.length <= 3 &&
+        new Set(value).size === value.length
+      );
+    }
+    if (
+      [
+        "langsToTranslateWhenHovering",
+        "alwaysTranslateLangs",
+        "neverTranslateLangs",
+      ].includes(key)
+    ) {
+      return validateStringArray(value, isLanguageCode);
+    }
+    if (key === "enabledServices") {
+      return (
+        validateStringArray(value, (service) =>
+          ["google", "bing", "yandex", "deepl"].includes(service)
+        ) &&
+        value.length > 0 &&
+        new Set(value).size === value.length
+      );
+    }
+    if (
+      [
+        "alwaysTranslateSites",
+        "neverTranslateSites",
+        "sitesToTranslateWhenHovering",
+      ].includes(key)
+    ) {
+      return validateStringArray(value);
+    }
+    if (key === "customDictionary") {
+      return (
+        isPlainObject(value) &&
+        Object.keys(value).length <= 10000 &&
+        Object.entries(value).every(
+          ([dictionaryKey, dictionaryValue]) =>
+            dictionaryKey.length <= 10000 &&
+            typeof dictionaryValue === "string" &&
+            dictionaryValue.length <= 10000
+        )
+      );
+    }
+    if (key === "customServices") return validateCustomServices(value);
+    if (key === "hotkeys") {
+      return (
+        isPlainObject(value) &&
+        Object.entries(value).every(
+          ([name, shortcut]) =>
+            name.length <= 100 &&
+            typeof shortcut === "string" &&
+            shortcut.length <= 100
+        )
+      );
+    }
+    if (key === "proxyServers") return validateProxyServers(value);
+    if (key === "ttsSpeed" || key === "ttsVolume") {
+      const numericValue = Number(value);
+      return (
+        (typeof value === "number" || typeof value === "string") &&
+        Number.isFinite(numericValue) &&
+        numericValue >= (key === "ttsSpeed" ? 0.25 : 0.1) &&
+        numericValue <= 2
+      );
+    }
+    if (key === "popupPanelSection") {
+      return Number.isInteger(value) && value >= 0 && value <= 6;
+    }
+
+    return typeof value === typeof defaultConfig[key];
+  }
 
   let onReadyObservers = [];
   let configIsReady = false;
@@ -134,9 +338,11 @@ const twpConfig = (function () {
     const r = {
       timeStamp: Date.now(),
       version: chrome.runtime.getManifest().version,
+      excludedSettings: Array.from(settingsExcludedFromBackup),
     };
 
     for (const key in defaultConfig) {
+      if (settingsExcludedFromBackup.has(key)) continue;
       //@ts-ignore
       r[key] = toObjectOrArrayIfTypeIsMapOrSet(twpConfig.get(key));
     }
@@ -150,15 +356,31 @@ const twpConfig = (function () {
    */
   twpConfig.import = function (configJSON) {
     const newconfig = JSON.parse(configJSON);
+    if (!isPlainObject(newconfig)) {
+      throw new Error("Invalid settings backup");
+    }
+
+    const importedEntries = [];
 
     for (const key in defaultConfig) {
       if (typeof newconfig[key] !== "undefined") {
         let value = newconfig[key];
+        if (!validateImportedValue(key, value)) {
+          throw new Error(`Invalid value for setting: ${key}`);
+        }
         value = fixObjectType(key, value);
-        //@ts-ignore
-        twpConfig.set(key, value);
+        importedEntries.push([key, value]);
       }
     }
+
+    if (importedEntries.length === 0) {
+      throw new Error("The backup does not contain any known settings");
+    }
+
+    importedEntries.forEach(([key, value]) => {
+      //@ts-ignore
+      twpConfig.set(key, value);
+    });
 
     if (
       typeof browser !== "undefined" &&

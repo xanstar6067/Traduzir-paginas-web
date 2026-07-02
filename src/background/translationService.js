@@ -460,6 +460,7 @@ const translationService = (function () {
    * @property {String} detectedLanguage
    * @property {TranslationStatus} status
    * @property {Promise<void>} waitTranlate
+   * @property {String} cacheKey
    */
 
   /**
@@ -566,6 +567,7 @@ const translationService = (function () {
 
           /** @type {TranslationInfo} */
           const progressInfo = {
+            cacheKey: requestHash,
             originalText: requestString,
             translatedText: null,
             detectedLanguage: null,
@@ -583,17 +585,23 @@ const translationService = (function () {
           this.translationsInProgress.set(requestHash, progressInfo);
 
           //cast
-          const cacheEntry = await translationCache.get(
-            this.serviceName,
-            sourceLanguage,
-            targetLanguage,
-            requestString
-          );
+          let cacheEntry = null;
+          try {
+            cacheEntry = await translationCache.get(
+              this.serviceName,
+              sourceLanguage,
+              targetLanguage,
+              requestString
+            );
+          } catch (error) {
+            // A disk-cache failure must not leave this request permanently in
+            // the "translating" state or prevent a normal network request.
+            console.error(error);
+          }
           if (cacheEntry) {
             progressInfo.translatedText = cacheEntry.translatedText;
             progressInfo.detectedLanguage = cacheEntry.detectedLanguage;
             progressInfo.status = "complete";
-            //this.translationsInProgress.delete([sourceLanguage, targetLanguage, requestString])
           } else {
             currentRequest.push(progressInfo);
             currentSize += progressInfo.originalText.length;
@@ -645,6 +653,7 @@ const translationService = (function () {
         }
 
         xhr.responseType = "json";
+        xhr.timeout = 15000;
 
         xhr.onload = (event) => {
           resolve(xhr.response);
@@ -731,12 +740,26 @@ const translationService = (function () {
             })
         );
       }
-      await Promise.all(
-        currentTranslationsInProgress.map((transInfo) => transInfo.waitTranlate)
-      );
-      return currentTranslationsInProgress.map((transInfo) =>
-        this.cbTransformResponse(transInfo.translatedText, dontSortResults)
-      );
+      try {
+        await Promise.all(
+          currentTranslationsInProgress.map((transInfo) => transInfo.waitTranlate)
+        );
+        return currentTranslationsInProgress.map((transInfo) =>
+          this.cbTransformResponse(transInfo.translatedText, dontSortResults)
+        );
+      } finally {
+        // Keep only genuinely in-flight requests. Callers that joined the same
+        // request retain their TranslationInfo reference, while the service no
+        // longer keeps completed or failed source text indefinitely.
+        currentTranslationsInProgress.forEach((transInfo) => {
+          if (
+            transInfo.status !== "translating" &&
+            this.translationsInProgress.get(transInfo.cacheKey) === transInfo
+          ) {
+            this.translationsInProgress.delete(transInfo.cacheKey);
+          }
+        });
+      }
     }
 
     /**
@@ -1022,52 +1045,61 @@ const translationService = (function () {
         !targetLanguage.startsWith("zh") &&
         Array.isArray(results)
       ) {
-        const retryIndexes = [];
+        const retryItems = [];
+
+        const hasLikelyChineseText = (text) => {
+          const hanCharacters = String(text || "").match(
+            /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g
+          );
+          if (!hanCharacters || hanCharacters.length < 2) return false;
+
+          // Han-only text is not enough to distinguish Chinese from Japanese.
+          // Require a common Chinese function character or a character whose
+          // simplified/traditional form is a strong Chinese signal.
+          return /[\u8fd9\u9019\u4eec\u5011\u5417\u55ce\u5565]|(?:\u6211\u4eec|\u6211\u5011|\u4ed6\u4eec|\u4ed6\u5011|\u4f60\u4eec|\u4f60\u5011|\u8fd9\u4e2a|\u9019\u500b|\u90a3\u4e2a|\u90a3\u500b|\u4ec0\u4e48|\u4ec0\u9ebc|\u600e\u4e48|\u600e\u9ebc|\u4e0d\u662f|\u7684\u662f|\u4e2d\u6587|\u6c49\u8bed|\u6f22\u8a9e|\u7b80\u4f53|\u7c21\u9ad4|\u7e41\u4f53|\u7e41\u9ad4)/.test(text);
+        };
 
         sourceArray2d.forEach((sourceArray, pieceIndex) => {
           const translatedArray = results[pieceIndex] || [];
-          const hasUntranslatedChinese = sourceArray.some(
-            (sourceText, textIndex) => {
-              const translatedText = translatedArray[textIndex];
-              const hasHanCharacters =
-                /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(sourceText);
-              const hasJapaneseOrKoreanCharacters =
-                /[\u3040-\u30ff\u31f0-\u31ff\uac00-\ud7af]/.test(sourceText);
-              const normalize = (text) =>
-                String(text || "")
-                  .replace(/\s+/g, " ")
-                  .trim();
-              const translatedTextWithoutPunctuation = normalize(
-                translatedText
-              ).replace(
-                /[\s.,!?;:\u2026'"\u201c\u201d\u2018\u2019()\[\]{}\-\u2013\u2014\u3002\u3001\uff01\uff1f\uff1b\uff1a\uff0c]/g,
-                ""
-              );
+          sourceArray.forEach((sourceText, textIndex) => {
+            const translatedText = translatedArray[textIndex];
+            const hasJapaneseOrKoreanCharacters =
+              /[\u3040-\u30ff\u31f0-\u31ff\uac00-\ud7af]/.test(sourceText);
+            const normalize = (text) =>
+              String(text || "")
+                .replace(/\s+/g, " ")
+                .trim();
+            const translatedTextWithoutPunctuation = normalize(
+              translatedText
+            ).replace(
+              /[\s.,!?;:\u2026'"\u201c\u201d\u2018\u2019()\[\]{}\-\u2013\u2014\u3002\u3001\uff01\uff1f\uff1b\uff1a\uff0c]/g,
+              ""
+            );
 
-              return (
-                hasHanCharacters &&
-                !hasJapaneseOrKoreanCharacters &&
-                (normalize(sourceText) === normalize(translatedText) ||
-                  translatedTextWithoutPunctuation.length === 0)
-              );
+            if (
+              hasLikelyChineseText(sourceText) &&
+              !hasJapaneseOrKoreanCharacters &&
+              (normalize(sourceText) === normalize(translatedText) ||
+                translatedTextWithoutPunctuation.length === 0)
+            ) {
+              retryItems.push({ pieceIndex, textIndex, sourceText });
             }
-          );
-
-          if (hasUntranslatedChinese) retryIndexes.push(pieceIndex);
+          });
         });
 
-        if (retryIndexes.length > 0) {
+        if (retryItems.length > 0) {
           const retryResults = await super.translate(
             "zh-TW",
             targetLanguage,
-            retryIndexes.map((index) => sourceArray2d[index]),
+            retryItems.map((item) => [item.sourceText]),
             dontSaveInPersistentCache,
             dontSortResults
           );
 
-          retryIndexes.forEach((pieceIndex, retryIndex) => {
-            if (retryResults && retryResults[retryIndex]) {
-              results[pieceIndex] = retryResults[retryIndex];
+          retryItems.forEach((item, retryIndex) => {
+            if (retryResults && retryResults[retryIndex]?.[0]) {
+              results[item.pieceIndex][item.textIndex] =
+                retryResults[retryIndex][0];
             }
           });
         }
@@ -1351,6 +1383,7 @@ const translationService = (function () {
   const deeplService = new (class {
     constructor() {
       this.DeepLTab = null;
+      this.requestSequence = 0;
     }
     /**
      *
@@ -1378,20 +1411,47 @@ const translationService = (function () {
         targetLanguage = "zh";
       }
 
+      const requestId = `${Date.now()}-${++this.requestSequence}`;
+
       return await new Promise((resolve) => {
-        const waitFirstTranslationResult = () => {
+        let settled = false;
+        const timeout = setTimeout(() => settle(""), 8000);
+        const settle = (result) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          resolve([[typeof result === "string" ? result : ""]]);
+        };
+
+        const waitFirstTranslationResult = (tabId) => {
           const listener = (request, sender, sendResponse) => {
-            if (request.action === "DeepL_firstTranslationResult") {
-              resolve([[request.result]]);
+            if (
+              request.action === "DeepL_firstTranslationResult" &&
+              request.requestId === requestId &&
+              sender.tab?.id === tabId
+            ) {
               chrome.runtime.onMessage.removeListener(listener);
+              clearTimeout(listenerTimeout);
+              settle(request.result);
             }
           };
           chrome.runtime.onMessage.addListener(listener);
 
-          setTimeout(() => {
+          const listenerTimeout = setTimeout(() => {
             chrome.runtime.onMessage.removeListener(listener);
-            resolve([[""]]);
           }, 8000);
+        };
+
+        const openDeepLTab = () => {
+          tabsCreate(
+            `https://www.deepl.com/#!${targetLanguage}!#${encodeURIComponent(
+              sourceArray2d[0][0]
+            )}!#${encodeURIComponent(requestId)}`,
+            (tab) => {
+              this.DeepLTab = tab;
+              waitFirstTranslationResult(tab.id);
+            }
+          );
         };
 
         if (this.DeepLTab) {
@@ -1403,6 +1463,7 @@ const translationService = (function () {
                 tab.id,
                 {
                   action: "translateTextWithDeepL",
+                  requestId,
                   text: sourceArray2d[0][0],
                   targetLanguage,
                 },
@@ -1411,33 +1472,19 @@ const translationService = (function () {
                 },
                 (response) => {
                   checkedLastError();
-                  resolve([[response]]);
+                  if (response?.requestId === requestId) {
+                    settle(response.result);
+                  } else {
+                    settle("");
+                  }
                 }
               );
             } else {
-              tabsCreate(
-                `https://www.deepl.com/#!${targetLanguage}!#${encodeURIComponent(
-                  sourceArray2d[0][0]
-                )}`,
-                (tab) => {
-                  this.DeepLTab = tab;
-                  waitFirstTranslationResult();
-                }
-              );
-              // resolve([[""]])
+              openDeepLTab();
             }
           });
         } else {
-          tabsCreate(
-            `https://www.deepl.com/#!${targetLanguage}!#${encodeURIComponent(
-              sourceArray2d[0][0]
-            )}`,
-            (tab) => {
-              this.DeepLTab = tab;
-              waitFirstTranslationResult();
-            }
-          );
-          // resolve([[""]])
+          openDeepLTab();
         }
       });
     }
@@ -1450,6 +1497,20 @@ const translationService = (function () {
    * @returns {Service} libreService
    */
   const createLibreService = (url, apiKey) => {
+    const endpoint = new URL(url);
+    const isLocalEndpoint =
+      endpoint.hostname === "localhost" ||
+      endpoint.hostname === "127.0.0.1" ||
+      endpoint.hostname === "[::1]";
+    if (
+      endpoint.protocol !== "https:" &&
+      !(endpoint.protocol === "http:" && isLocalEndpoint)
+    ) {
+      throw new Error(
+        "LibreTranslate requires HTTPS (HTTP is allowed only for localhost)"
+      );
+    }
+
     return new (class extends Service {
       constructor() {
         super(
@@ -1778,11 +1839,15 @@ const translationService = (function () {
   });
 
   twpConfig.onReady(function () {
-    if (twpConfig.get("customServices").find((cs) => cs.name === "libre")) {
-      const libre = twpConfig
-        .get("customServices")
-        .find((cs) => cs.name === "libre");
-      serviceList.set("libre", createLibreService(libre.url, libre.apiKey));
+    const libre = twpConfig
+      .get("customServices")
+      .find((cs) => cs.name === "libre");
+    if (libre) {
+      try {
+        serviceList.set("libre", createLibreService(libre.url, libre.apiKey));
+      } catch (error) {
+        console.error(error);
+      }
     }
 
     if (

@@ -5,6 +5,8 @@
 */
 
 void (function () {
+  let translationQueue = Promise.resolve();
+
   /**
    * Put the original text in the correct place, select the target language, wait and return the translation result.
    * @param {string} text
@@ -82,6 +84,12 @@ void (function () {
     });
   }
 
+  function queueTranslation(text, targetLanguage) {
+    const result = translationQueue.then(() => translate(text, targetLanguage));
+    translationQueue = result.catch(() => {});
+    return result;
+  }
+
   function injectInformation() {
     if (document.getElementById("twp-info")) return;
     const style = document.createElement("style");
@@ -139,19 +147,21 @@ void (function () {
   if (location.hash.startsWith("#!")) {
     injectInformation();
 
-    let [targetLanguage, text] = location.hash.split("!#");
+    let [targetLanguage, text, requestId] = location.hash.split("!#");
     location.hash = "";
 
     targetLanguage = decodeURIComponent(targetLanguage.substring(2));
     text = decodeURIComponent(text);
+    requestId = requestId ? decodeURIComponent(requestId) : "";
 
     setTimeout(() => {
-      translate(text, targetLanguage || "en")
+      queueTranslation(text, targetLanguage || "en")
         .then((result) => {
           console.info(result);
           chrome.runtime.sendMessage(
             {
               action: "DeepL_firstTranslationResult",
+              requestId,
               result,
             },
             checkedLastError
@@ -162,6 +172,7 @@ void (function () {
           chrome.runtime.sendMessage(
             {
               action: "DeepL_firstTranslationResult",
+              requestId,
               result: "",
             },
             checkedLastError
@@ -173,14 +184,14 @@ void (function () {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "translateTextWithDeepL") {
       console.info(request);
-      translate(request.text, request.targetLanguage)
+      queueTranslation(request.text, request.targetLanguage)
         .then((result) => {
           console.info(result);
-          sendResponse(result);
+          sendResponse({ requestId: request.requestId, result });
         })
         .catch((e) => {
           console.error(e);
-          sendResponse("");
+          sendResponse({ requestId: request.requestId, result: "" });
         });
     }
 

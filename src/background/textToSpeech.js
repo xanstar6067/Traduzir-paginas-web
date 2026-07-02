@@ -2,6 +2,7 @@
 
 const textToSpeech = (function () {
   const textToSpeech = {};
+  const MAX_CACHED_AUDIOS = 100;
 
   class BingHelper {
     /** @type {number} */
@@ -299,6 +300,16 @@ const textToSpeech = (function () {
         await this.audioCtx.suspend();
       }
     }
+
+    release(audio) {
+      const sourceIndex = this.sources.findIndex(
+        (source) => source.mediaElement === audio
+      );
+      if (sourceIndex !== -1) {
+        this.sources[sourceIndex].disconnect();
+        this.sources.splice(sourceIndex, 1);
+      }
+    }
   }
 
   class Service {
@@ -328,6 +339,29 @@ const textToSpeech = (function () {
       this.audioSpeed = 1.0;
 
       this.audioAmplifier = new AudioAmplifier();
+    }
+
+    getCachedAudio(key) {
+      const audio = this.audios.get(key);
+      if (audio) {
+        this.audios.delete(key);
+        this.audios.set(key, audio);
+      }
+      return audio;
+    }
+
+    cacheAudio(key, audio) {
+      this.audios.set(key, audio);
+      while (this.audios.size > MAX_CACHED_AUDIOS) {
+        const entries = Array.from(this.audios.entries());
+        const oldestEntry =
+          entries.find(([, cachedAudio]) => cachedAudio.paused) || entries[0];
+
+        const [oldestKey, oldestAudio] = oldestEntry;
+        this.audios.delete(oldestKey);
+        oldestAudio.pause();
+        this.audioAmplifier.release(oldestAudio);
+      }
     }
 
     /**
@@ -427,34 +461,25 @@ const textToSpeech = (function () {
       }
 
       const requests = this.getRequests(fullText);
-      const promises = [];
-
-      for (const requestText of requests) {
+      const audioPromises = requests.map(async (requestText) => {
         const audioKey = [targetLanguage, requestText].join(", ");
-        if (!this.audios.get(audioKey)) {
-          promises.push(
-            this.makeRequest(requestText, targetLanguage)
-              .then(
-                /** @type {string} */ (response) => {
-                  const audio = new Audio(response);
-                  this.audios.set(audioKey, audio);
-                  return response;
-                }
-              )
-              .catch((e) => {
-                console.error(e);
-                return null;
-              })
-          );
-        }
-      }
+        const cachedAudio = this.getCachedAudio(audioKey);
+        if (cachedAudio) return cachedAudio;
 
-      await Promise.all(promises);
-      return await this.play(
-        requests.map((text) =>
-          this.audios.get([targetLanguage, text].join(", "))
-        )
-      );
+        try {
+          const response = await this.makeRequest(requestText, targetLanguage);
+          const audio = new Audio(response);
+          this.cacheAudio(audioKey, audio);
+          return audio;
+        } catch (e) {
+          console.error(e);
+          return null;
+        }
+      });
+
+      // Keep local references so a very long utterance remains playable even
+      // when its earliest fragments have already left the bounded LRU cache.
+      return await this.play(await Promise.all(audioPromises));
     }
 
     /**
