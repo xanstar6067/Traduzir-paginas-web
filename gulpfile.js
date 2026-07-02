@@ -137,20 +137,6 @@ gulp.task("firefox-self-hosted", (cb) => {
       .pipe(gulp.dest(`build/${firefox_selfhosted_folder_name}`))
       .on("error", reject)
       .on("end", resolve);
-  }).then(() => {
-    const manifest = JSON.parse(
-      fs.readFileSync(
-        `build/${firefox_selfhosted_folder_name}/manifest.json`,
-        "utf8"
-      )
-    );
-    manifest.browser_specific_settings.gecko.update_url =
-      "https://raw.githubusercontent.com/FilipePS/Traduzir-paginas-web/master/dist/firefox/updates.json";
-    fs.writeFileSync(
-      `build/${firefox_selfhosted_folder_name}/manifest.json`,
-      JSON.stringify(manifest, null, 4),
-      "utf8"
-    );
   });
 });
 

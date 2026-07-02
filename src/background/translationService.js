@@ -983,6 +983,8 @@ const translationService = (function () {
       dontSaveInPersistentCache,
       dontSortResults = false
     ) {
+      const requestedSourceLanguage = sourceLanguage;
+
       /** @type {{search: string, replace: string}[]} */
       const replacements = [
         {
@@ -1002,13 +1004,76 @@ const translationService = (function () {
       await GoogleHelper_v2.findAuth();
       if (!GoogleHelper_v2.translateAuth) return;
 
-      return await super.translate(
+      const results = await super.translate(
         sourceLanguage,
         targetLanguage,
         sourceArray2d,
         dontSaveInPersistentCache,
         dontSortResults
       );
+
+      // Google currently sometimes detects Traditional Chinese as English when
+      // the source language is "auto" and returns that text unchanged or drops
+      // it from a mixed-language result. This is especially visible on pages
+      // that mix Chinese with another language.
+      // Retry only the affected pieces with an explicit Chinese source language.
+      if (
+        requestedSourceLanguage === "auto" &&
+        !targetLanguage.startsWith("zh") &&
+        Array.isArray(results)
+      ) {
+        const retryIndexes = [];
+
+        sourceArray2d.forEach((sourceArray, pieceIndex) => {
+          const translatedArray = results[pieceIndex] || [];
+          const hasUntranslatedChinese = sourceArray.some(
+            (sourceText, textIndex) => {
+              const translatedText = translatedArray[textIndex];
+              const hasHanCharacters =
+                /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(sourceText);
+              const hasJapaneseOrKoreanCharacters =
+                /[\u3040-\u30ff\u31f0-\u31ff\uac00-\ud7af]/.test(sourceText);
+              const normalize = (text) =>
+                String(text || "")
+                  .replace(/\s+/g, " ")
+                  .trim();
+              const translatedTextWithoutPunctuation = normalize(
+                translatedText
+              ).replace(
+                /[\s.,!?;:\u2026'"\u201c\u201d\u2018\u2019()\[\]{}\-\u2013\u2014\u3002\u3001\uff01\uff1f\uff1b\uff1a\uff0c]/g,
+                ""
+              );
+
+              return (
+                hasHanCharacters &&
+                !hasJapaneseOrKoreanCharacters &&
+                (normalize(sourceText) === normalize(translatedText) ||
+                  translatedTextWithoutPunctuation.length === 0)
+              );
+            }
+          );
+
+          if (hasUntranslatedChinese) retryIndexes.push(pieceIndex);
+        });
+
+        if (retryIndexes.length > 0) {
+          const retryResults = await super.translate(
+            "zh-TW",
+            targetLanguage,
+            retryIndexes.map((index) => sourceArray2d[index]),
+            dontSaveInPersistentCache,
+            dontSortResults
+          );
+
+          retryIndexes.forEach((pieceIndex, retryIndex) => {
+            if (retryResults && retryResults[retryIndex]) {
+              results[pieceIndex] = retryResults[retryIndex];
+            }
+          });
+        }
+      }
+
+      return results;
     }
   })();
 

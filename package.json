@@ -6,6 +6,7 @@
     "chrome 70"
   ],
   "scripts": {
+    "test": "node --test tests/*.test.js",
     "build": "npx gulp",
     "build:local-sourcemaps": "npx gulp --local-sourcemaps",
     "build:sign": "npx gulp --sign",
