@@ -16,7 +16,9 @@ const version = JSON.parse(
 
 const chromium_folder_name = `TWP_${version}_Chromium`;
 const firefox_folder_name = `TWP_${version}_Firefox`;
+const firefox_amo_folder_name = `TWP_${version}_Firefox_AMO`;
 const firefox_selfhosted_folder_name = `TWP_${version}_Firefox_selfhosted`;
+const firefox_amo_extension_id = "{7fb6cc60-0f06-4b9f-a8a4-6f468713c7bf}";
 
 const mappath = `../maps/${version}`;
 const mapconfig = remoteSourceMaps
@@ -140,6 +142,22 @@ gulp.task("firefox-self-hosted", (cb) => {
   });
 });
 
+gulp.task("firefox-amo-copy", () => {
+  return gulp
+    .src([`build/${firefox_folder_name}/**/**`], {encoding: false})
+    .pipe(gulp.dest(`build/${firefox_amo_folder_name}`));
+});
+
+gulp.task("firefox-amo-manifest", (cb) => {
+  const manifestPath = `build/${firefox_amo_folder_name}/manifest.json`;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+
+  manifest.browser_specific_settings.gecko.id = firefox_amo_extension_id;
+
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  cb();
+});
+
 gulp.task("firefox-zip", () => {
   return gulp
     .src([`build/${firefox_folder_name}/**/*`], {encoding: false})
@@ -151,6 +169,13 @@ gulp.task("firefox-self-hosted-zip", () => {
   return gulp
     .src([`build/${firefox_selfhosted_folder_name}/**/*`], {encoding: false})
     .pipe(zip(`TWP_${version}_Firefox_selfhosted.zip`))
+    .pipe(gulp.dest("build"));
+});
+
+gulp.task("firefox-amo-zip", () => {
+  return gulp
+    .src([`build/${firefox_amo_folder_name}/**/*`], {encoding: false})
+    .pipe(zip(`TWP_${version}_Firefox_AMO.zip`))
     .pipe(gulp.dest("build"));
 });
 
@@ -203,6 +228,18 @@ gulp.task(
     "firefox-self-hosted",
     "firefox-zip",
     "firefox-self-hosted-zip"
+  )
+);
+gulp.task(
+  "firefox-amo-build",
+  gulp.series(
+    "clean",
+    "firefox-copy",
+    "firefox-babel",
+    "firefox-move-sourcemap",
+    "firefox-amo-copy",
+    "firefox-amo-manifest",
+    "firefox-amo-zip"
   )
 );
 gulp.task(

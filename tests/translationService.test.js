@@ -255,6 +255,51 @@ test("Google does not retry Han-only Japanese text as Chinese", async () => {
   assert.deepEqual(Array.from(result[0]), ["\u6771\u4eac\u5927\u5b66"]);
 });
 
+test("Google retries untranslated Traditional Chinese site text detected as English", async () => {
+  const { messageListener, postRequests } = createGoogleHarness((request) => {
+    if (request[1] === "auto") {
+      return [["<pre>\u6700\u65b0\u6d88\u606f</pre>"], ["en"]];
+    }
+    return [["<pre>Latest news translated</pre>"], ["zh-TW"]];
+  });
+
+  const result = await translateHtml(messageListener, [["\u6700\u65b0\u6d88\u606f"]]);
+
+  assert.equal(postRequests.length, 2);
+  assert.deepEqual(
+    postRequests.map((request) => request[1]),
+    ["auto", "zh-TW"]
+  );
+  assert.deepEqual(Array.from(result[0]), ["Latest news translated"]);
+});
+
+test("Google retries partially untranslated Traditional Chinese mixed with translated text", async () => {
+  const sourceText =
+    "\u6b64\u5716\u7247\u5df2\u7d93\u88ab\u7e2e\u5c0f\u3002 Click to view full image.";
+  const { messageListener, postRequests } = createGoogleHarness((request) => {
+    if (request[1] === "auto") {
+      return [
+        [
+          "<pre>\u6b64\u5716\u7247\u5df2\u7d93\u88ab\u7e2e\u5c0f\u3002 Translated English</pre>",
+        ],
+        ["en"],
+      ];
+    }
+    return [["<pre>Fully translated Traditional Chinese text</pre>"], ["zh-TW"]];
+  });
+
+  const result = await translateHtml(messageListener, [[sourceText]]);
+
+  assert.equal(postRequests.length, 2);
+  assert.deepEqual(
+    postRequests.map((request) => request[1]),
+    ["auto", "zh-TW"]
+  );
+  assert.deepEqual(Array.from(result[0]), [
+    "Fully translated Traditional Chinese text",
+  ]);
+});
+
 test("completed translations are released from the in-memory request map", async () => {
   const { messageListener, postRequests } = createGoogleHarness(() => [
     ["<pre>Translated</pre>"],

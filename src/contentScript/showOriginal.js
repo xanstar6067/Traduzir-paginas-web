@@ -159,12 +159,20 @@ twpConfig.onReady(function () {
     shadowRoot = divElement.attachShadow({
       mode: "closed",
     });
-    shadowRoot.innerHTML = `
-            <link rel="stylesheet" href="${chrome.runtime.getURL(
-              "/contentScript/css/showOriginal.css"
-            )}">
-            <div id="originalText" dir="auto"></div>
-        `;
+    {
+      const link = document.createElement("link");
+      link.setAttribute("rel", "stylesheet");
+      link.setAttribute(
+        "href",
+        chrome.runtime.getURL("/contentScript/css/showOriginal.css")
+      );
+      shadowRoot.appendChild(link);
+
+      const originalText = document.createElement("div");
+      originalText.setAttribute("id", "originalText");
+      originalText.setAttribute("dir", "auto");
+      shadowRoot.appendChild(originalText);
+    }
 
     {
       const style = document.createElement("style");

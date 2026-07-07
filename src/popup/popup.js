@@ -733,7 +733,9 @@ twpConfig
             "✔ " + textAlways;
         }
 
-        $("option[data-i18n=btnDonate]").innerHTML += " &#10084;";
+        $("option[data-i18n=btnDonate]").appendChild(
+          document.createTextNode(" " + String.fromCharCode(10084))
+        );
       }
     );
   });

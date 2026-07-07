@@ -125,14 +125,25 @@ void (function () {
       box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
       padding: 7px;
     `;
-    info.innerHTML = `
-      <p style="font-size: 20px; font-weight: bold;">TWP - Translate Web Pages</p>
-      <p data-i18n="msgDeepLTabReasoOpened">This tab opened because you clicked to translate selected text using DeepL.</p>
-      <button data-i18n="msgDontShowAgain">Don't show again</button>
-    `;
+    const title = document.createElement("p");
+    title.style.cssText = "font-size: 20px; font-weight: bold;";
+    title.textContent = "TWP - Translate Web Pages";
+
+    const reason = document.createElement("p");
+    reason.dataset.i18n = "msgDeepLTabReasoOpened";
+    reason.textContent =
+      "This tab opened because you clicked to translate selected text using DeepL.";
+
+    const button = document.createElement("button");
+    button.dataset.i18n = "msgDontShowAgain";
+    button.textContent = "Don't show again";
+
+    info.appendChild(title);
+    info.appendChild(reason);
+    info.appendChild(button);
     document.body.insertBefore(info, document.body.firstChild);
 
-    info.querySelector("button").addEventListener("click", () => {
+    button.addEventListener("click", () => {
       twpConfig.set("textTranslatorService", "google");
       setTimeout(() => window.close(), 500);
     });

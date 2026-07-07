@@ -73,8 +73,13 @@ twpConfig
       window.open("https://www.patreon.com/filipeps", "_blank");
     };
 
-    $("#btnOptionB").innerHTML += ' <i class="arrow down"></i>';
-    $("#btnOptions option[value='donate']").innerHTML += " &#10084;";
+    $("#btnOptionB").appendChild(document.createTextNode(" "));
+    const optionArrow = document.createElement("i");
+    optionArrow.className = "arrow down";
+    $("#btnOptionB").appendChild(optionArrow);
+    $("#btnOptions option[value='donate']").appendChild(
+      document.createTextNode(" " + String.fromCharCode(10084))
+    );
 
     var cStyle = getComputedStyle(document.querySelector("#btnOptionB"));
     btnOptions.style.width = parseInt(cStyle.width) + 0 + "px";

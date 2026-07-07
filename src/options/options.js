@@ -5,19 +5,22 @@ setTimeout(() => {
     .then((response) => response.text())
     .then((responseText) => {
       window.scrollTo(0, 0);
-      document.getElementById("release_notes").innerHTML = responseText;
-      document.getElementById("_msgHasBeenUpdated").textContent =
-        twpI18n.getMessage("msgHasBeenUpdated");
-      document.getElementById("_msgHasBeenUpdated").innerHTML = document
-        .getElementById("_msgHasBeenUpdated")
-        .textContent.replace(
-          "#EXTENSION_NAME#",
-          "<b>" + chrome.runtime.getManifest().name + "</b>"
-        )
-        .replace(
-          "#EXTENSION_VERSION#",
-          "<b>" + chrome.runtime.getManifest().version + "</b>"
-        );
+      twpSafeDom.setTrustedHTML(
+        document.getElementById("release_notes"),
+        responseText
+      );
+
+      const manifest = chrome.runtime.getManifest();
+      twpSafeDom.appendTextWithPlaceholders(
+        document.getElementById("_msgHasBeenUpdated"),
+        twpI18n.getMessage("msgHasBeenUpdated"),
+        {
+          "#EXTENSION_NAME#": () =>
+            twpSafeDom.createTextElement("b", manifest.name),
+          "#EXTENSION_VERSION#": () =>
+            twpSafeDom.createTextElement("b", manifest.version),
+        }
+      );
       document.getElementById("_donationText").textContent =
         twpI18n.getMessage("donationText");
       document.getElementById("_donatewithpaypal").textContent =
@@ -25,12 +28,14 @@ setTimeout(() => {
 
       document.getElementById("_donationRecipient").textContent =
         twpI18n.getMessage("msgDonationRecipient");
-      document.getElementById("_donationRecipient").innerHTML = document
-        .getElementById("_donationRecipient")
-        .textContent.replace(
-          "#EXTENSION_NAME#",
-          "<b>" + chrome.runtime.getManifest().name + "</b>"
-        );
+      twpSafeDom.appendTextWithPlaceholders(
+        document.getElementById("_donationRecipient"),
+        document.getElementById("_donationRecipient").textContent,
+        {
+          "#EXTENSION_NAME#": () =>
+            twpSafeDom.createTextElement("b", manifest.name),
+        }
+      );
 
       // donation options
       if (navigator.language === "pt-BR") {
@@ -342,7 +347,7 @@ twpConfig
 
       const close = document.createElement("span");
       close.setAttribute("class", "w3-button w3-transparent w3-display-right");
-      close.innerHTML = "&times;";
+      close.textContent = String.fromCharCode(215);
 
       close.onclick = (e) => {
         e.preventDefault();
@@ -383,7 +388,7 @@ twpConfig
 
       const close = document.createElement("span");
       close.setAttribute("class", "w3-button w3-transparent w3-display-right");
-      close.innerHTML = "&times;";
+      close.textContent = String.fromCharCode(215);
 
       close.onclick = (e) => {
         e.preventDefault();
@@ -424,7 +429,7 @@ twpConfig
 
       const close = document.createElement("span");
       close.setAttribute("class", "w3-button w3-transparent w3-display-right");
-      close.innerHTML = "&times;";
+      close.textContent = String.fromCharCode(215);
 
       close.onclick = (e) => {
         e.preventDefault();
@@ -473,7 +478,7 @@ twpConfig
 
       const close = document.createElement("span");
       close.setAttribute("class", "w3-button w3-transparent w3-display-right");
-      close.innerHTML = "&times;";
+      close.textContent = String.fromCharCode(215);
 
       close.onclick = (e) => {
         e.preventDefault();
@@ -514,7 +519,7 @@ twpConfig
 
       const close = document.createElement("span");
       close.setAttribute("class", "w3-button w3-transparent w3-display-right");
-      close.innerHTML = "&times;";
+      close.textContent = String.fromCharCode(215);
 
       close.onclick = (e) => {
         e.preventDefault();
@@ -556,7 +561,7 @@ twpConfig
       }
       const close = document.createElement("span");
       close.setAttribute("class", "w3-button w3-transparent w3-display-right");
-      close.innerHTML = "&times;";
+      close.textContent = String.fromCharCode(215);
 
       close.onclick = (e) => {
         e.preventDefault();
@@ -603,7 +608,7 @@ twpConfig
 
       const close = document.createElement("span");
       close.setAttribute("class", "w3-button w3-transparent w3-display-right");
-      close.innerHTML = "&times;";
+      close.textContent = String.fromCharCode(215);
 
       close.onclick = (e) => {
         e.preventDefault();
@@ -818,20 +823,26 @@ twpConfig
     );
 
     // hotkeys options
-    function escapeHtml(unsafe) {
-      return unsafe
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+    function replaceCtrlPlaceholderWithKbd(element) {
+      const parts = element.textContent.split("[Ctrl]");
+      twpSafeDom.removeChildren(element);
+
+      parts.forEach((part, index) => {
+        if (index > 0) {
+          element.appendChild(twpSafeDom.createTextElement("kbd", "Ctrl"));
+        }
+        if (part) {
+          element.appendChild(document.createTextNode(part));
+        }
+      });
     }
-    $('[data-i18n="lblTranslateSelectedWhenPressTwice"]').innerHTML = $(
-      '[data-i18n="lblTranslateSelectedWhenPressTwice"]'
-    ).innerHTML.replace("[Ctrl]", "<kbd>Ctrl</kbd>");
-    $('[data-i18n="lblTranslateTextOverMouseWhenPressTwice"]').innerHTML = $(
-      '[data-i18n="lblTranslateTextOverMouseWhenPressTwice"]'
-    ).innerHTML.replace("[Ctrl]", "<kbd>Ctrl</kbd>");
+
+    replaceCtrlPlaceholderWithKbd(
+      $('[data-i18n="lblTranslateSelectedWhenPressTwice"]')
+    );
+    replaceCtrlPlaceholderWithKbd(
+      $('[data-i18n="lblTranslateTextOverMouseWhenPressTwice"]')
+    );
 
     $("#openNativeShortcutManager").onclick = (e) => {
       tabsCreate("chrome://extensions/shortcuts");
@@ -921,36 +932,54 @@ twpConfig
       const enterShortcut =
         twpI18n.getMessage("enterShortcut") || "Enter shortcut";
 
-      function escapeHtml(unsafe) {
-        return unsafe
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#039;");
-      }
-      description = escapeHtml(description);
-
       const li = document.createElement("li");
       li.classList.add("shortcut-row");
       li.setAttribute("id", hotkeyname);
-      li.innerHTML = `
-        <div>${description}</div>
-        <div class="shortcut-input-options">
-            <div style="position: relative;">
-                <input name="input" class="w3-input w3-border shortcut-input" type="text" readonly placeholder="${enterShortcut}" data-i18n-placeholder="enterShortcut">
-                <p name="error" class="shortcut-error" style="position: absolute;"></p>
-            </div>
-            <div class="w3-hover-light-grey shortcut-button" name="removeKey"><i class="gg-trash"></i></div>
-            <div class="w3-hover-light-grey shortcut-button" name="resetKey"><i class="gg-sync"></i></div>
-        </div>  
-        `;
-      $("#KeyboardShortcuts").appendChild(li);
 
-      const input = li.querySelector(`[name="input"]`);
-      const error = li.querySelector(`[name="error"]`);
-      const removeKey = li.querySelector(`[name="removeKey"]`);
-      const resetKey = li.querySelector(`[name="resetKey"]`);
+      const descriptionElement = document.createElement("div");
+      descriptionElement.textContent = description;
+      li.appendChild(descriptionElement);
+
+      const shortcutOptions = document.createElement("div");
+      shortcutOptions.className = "shortcut-input-options";
+      li.appendChild(shortcutOptions);
+
+      const inputWrapper = document.createElement("div");
+      inputWrapper.style.position = "relative";
+      shortcutOptions.appendChild(inputWrapper);
+
+      const input = document.createElement("input");
+      input.setAttribute("name", "input");
+      input.className = "w3-input w3-border shortcut-input";
+      input.type = "text";
+      input.readOnly = true;
+      input.placeholder = enterShortcut;
+      input.dataset.i18nPlaceholder = "enterShortcut";
+      inputWrapper.appendChild(input);
+
+      const error = document.createElement("p");
+      error.setAttribute("name", "error");
+      error.className = "shortcut-error";
+      error.style.position = "absolute";
+      inputWrapper.appendChild(error);
+
+      const removeKey = document.createElement("div");
+      removeKey.className = "w3-hover-light-grey shortcut-button";
+      removeKey.setAttribute("name", "removeKey");
+      const removeIcon = document.createElement("i");
+      removeIcon.className = "gg-trash";
+      removeKey.appendChild(removeIcon);
+      shortcutOptions.appendChild(removeKey);
+
+      const resetKey = document.createElement("div");
+      resetKey.className = "w3-hover-light-grey shortcut-button";
+      resetKey.setAttribute("name", "resetKey");
+      const resetIcon = document.createElement("i");
+      resetIcon.className = "gg-sync";
+      resetKey.appendChild(resetIcon);
+      shortcutOptions.appendChild(resetKey);
+
+      $("#KeyboardShortcuts").appendChild(li);
 
       input.value = twpConfig.get("hotkeys")[hotkeyname];
       if (input.value) {

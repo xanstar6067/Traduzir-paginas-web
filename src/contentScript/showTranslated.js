@@ -408,7 +408,7 @@ Promise.all([twpConfig.onReady(), getTabHostName()]).then(function (_) {
     shadowRoot = divElement.attachShadow({
       mode: "closed",
     });
-    shadowRoot.innerHTML = `
+    twpSafeDom.setTrustedHTML(shadowRoot, `
         <link rel="stylesheet" href="${chrome.runtime.getURL(
           "/contentScript/css/showTranslated.css"
         )}">
@@ -477,8 +477,8 @@ Promise.all([twpConfig.onReady(), getTabHostName()]).then(function (_) {
                         </li>
                     </ul>
                 </div>
-            </div>
-        `;
+        </div>
+    `);
 
     {
       const style = document.createElement("style");

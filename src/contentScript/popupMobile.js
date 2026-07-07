@@ -44,7 +44,7 @@ void (async function () {
   rootElement.classList.add("notranslate");
 
   const shadowRoot = rootElement.attachShadow({ mode: "closed" });
-  shadowRoot.innerHTML = htmlText;
+  twpSafeDom.setTrustedHTML(shadowRoot, htmlText);
 
   // update css property --popup-height
   setInterval(() => {
@@ -594,7 +594,7 @@ void (async function () {
     const eRecentsLangs = menuSelectLanguage.querySelector('[name="targets"]');
 
     const buildRecentsLanguages = () => {
-      eRecentsLangs.innerHTML = "";
+      eRecentsLangs.textContent = "";
       for (const value of twpConfig.get("targetLanguages")) {
         const option = document.createElement("option");
         option.value = value;

@@ -117,6 +117,7 @@
       "match_about_blank": true,
       "js": [
         "/lib/polyfill.js",
+        "/lib/safeDom.js",
         "/lib/checkedLastError.js",
         "/lib/languages.js",
         "/lib/config.js",
@@ -153,6 +154,7 @@
     "persistent": true,
     "scripts": [
       "/lib/polyfill.js",
+      "/lib/safeDom.js",
       "/lib/checkedLastError.js",
       "/lib/stuff.js",
       "/lib/languages.js",

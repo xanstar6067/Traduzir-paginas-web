@@ -688,7 +688,7 @@ const translationService = (function () {
      * @param {boolean} dontSortResults
      * @returns {Promise<string[][]>}
      */
-    async translate(
+    async translateWithInfo(
       sourceLanguage,
       targetLanguage,
       sourceArray2d,
@@ -744,9 +744,12 @@ const translationService = (function () {
         await Promise.all(
           currentTranslationsInProgress.map((transInfo) => transInfo.waitTranlate)
         );
-        return currentTranslationsInProgress.map((transInfo) =>
-          this.cbTransformResponse(transInfo.translatedText, dontSortResults)
-        );
+        return {
+          results: currentTranslationsInProgress.map((transInfo) =>
+            this.cbTransformResponse(transInfo.translatedText, dontSortResults)
+          ),
+          translationInfos: currentTranslationsInProgress,
+        };
       } finally {
         // Keep only genuinely in-flight requests. Callers that joined the same
         // request retain their TranslationInfo reference, while the service no
@@ -760,6 +763,37 @@ const translationService = (function () {
           }
         });
       }
+    }
+
+    /**
+     * Translates the `sourceArray2d` and returns the per-request metadata used
+     * by service-specific recovery logic.
+     *
+     * If `dontSaveInPersistentCache` is **true** then the translation result will not be saved in the on-disk translation cache, only in the in-memory cache.
+     *
+     * The `dontSortResults` parameter is only valid when using the ***google*** translation service, if its value is **true** then the translation result will not be sorted.
+     * @param {string} sourceLanguage
+     * @param {string} targetLanguage
+     * @param {Array<string[]>} sourceArray2d
+     * @param {boolean} dontSaveInPersistentCache
+     * @param {boolean} dontSortResults
+     * @returns {Promise<{results: string[][], translationInfos: TranslationInfo[]}>}
+     */
+    async translate(
+      sourceLanguage,
+      targetLanguage,
+      sourceArray2d,
+      dontSaveInPersistentCache = false,
+      dontSortResults = false
+    ) {
+      const { results } = await this.translateWithInfo(
+        sourceLanguage,
+        targetLanguage,
+        sourceArray2d,
+        dontSaveInPersistentCache,
+        dontSortResults
+      );
+      return results;
     }
 
     /**
@@ -1027,7 +1061,7 @@ const translationService = (function () {
       await GoogleHelper_v2.findAuth();
       if (!GoogleHelper_v2.translateAuth) return;
 
-      const results = await super.translate(
+      const { results, translationInfos } = await super.translateWithInfo(
         sourceLanguage,
         targetLanguage,
         sourceArray2d,
@@ -1047,20 +1081,23 @@ const translationService = (function () {
       ) {
         const retryItems = [];
 
-        const hasLikelyChineseText = (text) => {
-          const hanCharacters = String(text || "").match(
-            /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g
-          );
-          if (!hanCharacters || hanCharacters.length < 2) return false;
+        const hasHanText = (text) =>
+          /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(text);
 
-          // Han-only text is not enough to distinguish Chinese from Japanese.
-          // Require a common Chinese function character or a character whose
-          // simplified/traditional form is a strong Chinese signal.
-          return /[\u8fd9\u9019\u4eec\u5011\u5417\u55ce\u5565]|(?:\u6211\u4eec|\u6211\u5011|\u4ed6\u4eec|\u4ed6\u5011|\u4f60\u4eec|\u4f60\u5011|\u8fd9\u4e2a|\u9019\u500b|\u90a3\u4e2a|\u90a3\u500b|\u4ec0\u4e48|\u4ec0\u9ebc|\u600e\u4e48|\u600e\u9ebc|\u4e0d\u662f|\u7684\u662f|\u4e2d\u6587|\u6c49\u8bed|\u6f22\u8a9e|\u7b80\u4f53|\u7c21\u9ad4|\u7e41\u4f53|\u7e41\u9ad4)/.test(text);
-        };
+        const hasStrongChineseSignal = (text) =>
+          /[\u9019\u5011\u55ce\u5565\u570b\u5b78\u9ad4\u767c\u6703\u7522\u8cc7\u8a0a\u9801\u7db2\u806f\u8acb\u5c08\u5340\u71b1\u9ede\u805e\u95dc\u65bc\u6b61\u8cfc\u8cb7\u958b\u9589]|(?:\u6211\u5011|\u4ed6\u5011|\u4f60\u5011|\u9019\u500b|\u90a3\u500b|\u4ec0\u9ebc|\u600e\u9ebc|\u6f22\u8a9e|\u7c21\u9ad4|\u7e41\u9ad4)/.test(
+            text
+          );
+
+        const googleDetectedCjkLanguage = (detectedLanguage) =>
+          /^(ja|ko)(?:-|$)/i.test(detectedLanguage || "");
+
+        const targetLanguageUsesHan = /^(zh|ja|ko)(?:-|$)/i.test(targetLanguage);
 
         sourceArray2d.forEach((sourceArray, pieceIndex) => {
           const translatedArray = results[pieceIndex] || [];
+          const detectedLanguage =
+            translationInfos[pieceIndex]?.detectedLanguage || "";
           sourceArray.forEach((sourceText, textIndex) => {
             const translatedText = translatedArray[textIndex];
             const hasJapaneseOrKoreanCharacters =
@@ -1075,12 +1112,17 @@ const translationService = (function () {
               /[\s.,!?;:\u2026'"\u201c\u201d\u2018\u2019()\[\]{}\-\u2013\u2014\u3002\u3001\uff01\uff1f\uff1b\uff1a\uff0c]/g,
               ""
             );
+            const translatedTextStillContainsHan =
+              !targetLanguageUsesHan && hasHanText(translatedText);
 
             if (
-              hasLikelyChineseText(sourceText) &&
+              hasHanText(sourceText) &&
               !hasJapaneseOrKoreanCharacters &&
+              (!googleDetectedCjkLanguage(detectedLanguage) ||
+                hasStrongChineseSignal(sourceText)) &&
               (normalize(sourceText) === normalize(translatedText) ||
-                translatedTextWithoutPunctuation.length === 0)
+                translatedTextWithoutPunctuation.length === 0 ||
+                translatedTextStillContainsHan)
             ) {
               retryItems.push({ pieceIndex, textIndex, sourceText });
             }
